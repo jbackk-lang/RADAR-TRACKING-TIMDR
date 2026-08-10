@@ -17,6 +17,14 @@ Known simplification, disclosed rather than silently assumed: `F` and
 `Q` are built for a fixed dt=1 per update() call. If your measurements
 arrive at irregular intervals, rebuild F/Q with the real dt each step
 (F = [[1, dt], [0, 1]]) instead of using this class as-is.
+
+ADDED LATER: `predict()` -- runs only the predict half of the cycle
+(advance state and uncertainty, no measurement correction). Added so
+JRegulator (core/j_regulator.py) can implement its "minimal version"
+gating: when an incoming measurement's defect looks like an outlier,
+call predict() instead of update(z) and skip correcting the state
+toward a bad reading, then coast on the motion model for that step.
+update() itself is unchanged.
 """
 import numpy as np
 
@@ -45,6 +53,13 @@ class KalmanFilterCustom:
         self.x = self.x + K * y
         self.P = (np.eye(2) - K @ self.H) @ self.P
 
+        return float(self.x[0, 0])
+
+    def predict(self) -> float:
+        """Sama predykcja, bez korekcji pomiarem -- coasting na modelu
+        ruchu, gdy JRegulator odrzuci pomiar jako defekt/outlier."""
+        self.x = self.F @ self.x
+        self.P = self.F @ self.P @ self.F.T + self.Q
         return float(self.x[0, 0])
 
     @property
