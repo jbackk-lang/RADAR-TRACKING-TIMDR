@@ -70,3 +70,34 @@ python3 -m pytest tests/ -v
 12 testów, wszystkie przechodzą, w tym testy regresyjne na oba opisane wyżej
 błędy (numpy deprecation w Kalmanie, katastrofalna dywergencja w filtrze
 cząsteczkowym na prawdziwych danych).
+Filtr cząsteczkowy śledzi obiekt, trzymając tysiące "hipotez" (cząsteczek) —
+każda to zgadywanka "obiekt może być tutaj". Po każdym pomiarze cząsteczki
+bliższe pomiarowi dostają większą wagę, dalsze mniejszą, i filtr losuje nowy
+zestaw cząsteczek faworyzując te z wyższą wagą. Średnia z cząsteczek to
+estymata pozycji.
+
+Problem: między pomiarami cząsteczki muszą się same "rozproszyć", żeby
+nadążyć za ruchem obiektu — to jak grupa ludzi z zawiązanymi oczami, która co
+sekundę robi mały losowy krok, próbując trafić tam, gdzie faktycznie jest
+szukana osoba. Jeśli osoba idzie wolno, mały losowy krok wystarczy. Ale jeśli
+osoba biegnie (jak samochód na autostradzie, do 33 m/s), mały losowy krok
+nigdy jej nie dogoni — wszyscy zostają z tyłu. Wtedy WSZYSTKIE cząsteczki
+dostają fatalną wagę naraz, bo żadna nie jest blisko prawdy. Filtr traci
+punkt odniesienia: zamiast poprawiać się z każdym pomiarem, zamraża się w
+miejscu, podczas gdy prawdziwy obiekt ucieka coraz dalej. To jest właśnie
+"katastrofalna dywergencja" — błąd nie maleje ani nie oscyluje, tylko rośnie
+bez końca, aż filtr staje się bezużyteczny.
+
+Pierwsza próba naprawy po prostu kazała cząsteczkom robić większe losowe
+kroki (`process_std` z 1.0 na 4.0). To zadziałało w teście, w którym obiekt
+poruszał się wolno — ale to był zbyt łagodny test. Przy prawdziwej prędkości
+samochodu i tak było za wolno: średni błąd wynosił ponad 2 kilometry.
+
+Prawdziwa naprawa: zamiast kazać cząsteczkom "chodzić losowo szybciej", dano
+im pamięć prędkości — każda cząsteczka wie nie tylko "gdzie jestem", ale też
+"jak szybko się poruszam", i przewiduje swoją następną pozycję na tej
+podstawie (dokładnie tak, jak robi to filtr Kalmana). To jak zamiana ludzi z
+zawiązanymi oczami robiących losowe kroki na ludzi, którzy słyszą, w którą
+stronę i jak szybko biegnie szukana osoba, i biegną w tym samym kierunku,
+zamiast błądzić na oślep. Po tej zmianie filtr nadąża nawet przy prędkościach
+autostradowych — patrz tabela z prawdziwymi danymi niżej.
