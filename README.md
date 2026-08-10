@@ -100,4 +100,4 @@ podstawie (dokładnie tak, jak robi to filtr Kalmana). To jak zamiana ludzi z
 zawiązanymi oczami robiących losowe kroki na ludzi, którzy słyszą, w którą
 stronę i jak szybko biegnie szukana osoba, i biegną w tym samym kierunku,
 zamiast błądzić na oślep. Po tej zmianie filtr nadąża nawet przy prędkościach
-autostradowych — patrz tabela z prawdziwymi danymi niżej.
+autostradowych — patrz tabela z prawdziwymi danymi wyżej.
