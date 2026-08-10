@@ -44,6 +44,15 @@ repo's TIMDR filter. Defaults below were chosen against the real GPS
 trip data described above, not against every possible use case -- if
 you validate against your own data and it doesn't hold up, that's a
 reason to retune, not a reason to trust the defaults blindly.
+
+ADDED LATER: `roughen()` -- an optional anti-deprivation method, meant
+to be triggered externally (e.g. by JRegulator's "resonance" signal in
+core/j_regulator.py) when a sustained run of large innovations suggests
+the particle cloud may be losing lock, not just reacting to one noisy
+point. It injects extra spread into the existing cloud instead of
+resampling from scratch, so it doesn't throw away whatever track the
+filter still has. This is additive: update() is unchanged, and nothing
+calls roughen() unless you wire it in yourself.
 """
 import numpy as np
 
@@ -81,6 +90,21 @@ class ParticleFilterCustom:
         self.weights = np.ones(self.n) / self.n
 
         return float(np.mean(self.particles))
+
+    def roughen(self, position_factor: float = 2.0, velocity_factor: float = 1.5) -> None:
+        """Anti-deprivation "roughening": adds extra Gaussian jitter to
+        every particle's position and velocity, scaled off the filter's
+        own current process noise settings. Meant to be called when an
+        external signal (e.g. JRegulator's resonance threshold) suggests
+        the cloud has been surprised repeatedly and may be collapsing
+        onto the wrong hypothesis -- it doesn't fix a bad track, but it
+        buys the resampling step more diversity to recover from one."""
+        self.particles += self._rng.normal(
+            0, self.pos_process_std * position_factor, self.n
+        )
+        self.velocities += self._rng.normal(
+            0, self.vel_process_std * velocity_factor, self.n
+        )
 
     @property
     def spread(self) -> float:
