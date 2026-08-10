@@ -39,7 +39,8 @@ błędu ~1.6m, a nie trwała utrata śledzenia. Domyślne parametry
 `measurement_var`) są dobrane pod te konkretne dane walidacyjne — przy innej
 dynamice celu / innym szumie sensora wymagają ponownego strojenia, tak samo
 jak `min_speed` w repo RADAR-TRACKING.
-
+ „Uwaga: parametry filtra cząsteczkowego wymagają strojenia pod dane”.
+ 
 ## Walidacja na prawdziwych danych
 
 `data/real_trips_sample.csv` — te same 4 prawdziwe trasy GPS co w
