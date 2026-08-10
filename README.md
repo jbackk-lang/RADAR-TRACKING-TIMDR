@@ -1,4 +1,4 @@
-# RADAR-CUSTOM
+# RADAR-CUSTOM-TIMDR
 
 Osobny, prosty projekt (strategy pattern): `RadarTrackerCustom(backend)` wybiera
 filtr (`kalman` lub `particle`) i deleguje do niego `.update(measurement)`.
