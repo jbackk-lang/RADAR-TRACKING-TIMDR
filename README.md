@@ -101,3 +101,77 @@ zawiązanymi oczami robiących losowe kroki na ludzi, którzy słyszą, w któr�
 stronę i jak szybko biegnie szukana osoba, i biegną w tym samym kierunku,
 zamiast błądzić na oślep. Po tej zmianie filtr nadąża nawet przy prędkościach
 autostradowych — patrz tabela z prawdziwymi danymi wyżej.
+
+## Topologiczny regulator filtra (Jop / twist / defect / resonance)
+
+`core/j_regulator.py` -- adaptuje parametry filtra na podstawie pary
+kolejnych ech radaru, wg pomysłu:
+
+```python
+Jop = J(twist, defect, resonance)
+j = Jop(prev_echo, curr_echo)
+if j["defect"] > DEFECT_THRESHOLD:
+    return None  # odrzucamy pomiar
+```
+
+Zastrzeżenie: operatory J/M (twist), ΔS (defekt), R (rezonans) w
+GIA-and-TIMDR (`core/operators.py`) są zdefiniowane dla ciągów bajtów
+(kompresja), nie dla skalarnych ech radaru. `JRegulator` to nowa, ciągła
+adaptacja tamtej idei (M = orientacja zmiany, ΔS = gwałtowność zmiany,
+R = energia), nie przeniesienie gotowego kodu. `resonance` jako "energia"
+wymaga pamięci w czasie, więc `JRegulator` jest klasą ze stanem (EMA), a
+nie czystą funkcją `Jop(prev, curr)` jak w pseudokodzie.
+
+`gate()` (wersja minimalna) jest podpięta pod backend `kalman` -- odrzucony
+pomiar powoduje krok `predict()` (coasting na modelu ruchu) zamiast
+`update(z)`. `regulate_particle_params()` (wersja cząsteczkowa) jest
+podpięta pod backend `particle` -- podbija `process_std` przy dużym twist,
+`measurement_sigma` przy dużym defect, i wywołuje `roughen()` (rozproszenie
+chmury, nazwa `spread` była już zajęta jako właściwość) przy dużym
+resonance. Domyślnie `regulator=None` -- zachowanie identyczne jak wcześniej.
+
+```python
+from core.radar_tracker_custom import RadarTrackerCustom
+from core.j_regulator import JRegulator
+
+tracker = RadarTrackerCustom("particle", regulator=JRegulator(), seed=0)
+tracker.update(measurement)
+```
+
+### Uczciwy wynik walidacji (`python3 data/validate_regulator.py`)
+
+Po drodze znalazłem i naprawiłem realny błąd kompozycji: pierwsza wersja
+skalowała parametry od ich AKTUALNEJ (już podbitej) wartości zamiast od
+stałej bazy, więc na danych, gdzie regulator wyzwalał się niemal co krok,
+`process_std` rosło mnożnikowo przez 956 kroków -- estymaty rzędu 1e20+ m.
+Naprawione przez skalowanie zawsze od wartości bazowych z `__init__`.
+
+**Wersja kalmanowa (gate):** realne, normalne przyspieszenia w danych GPS
+dają skoki 4-32m/krok -- to nie anomalie, to zwykła jazda. Przy zbyt niskim
+progu (15) regulator odrzucał 30-50% prawdziwych pomiarów i błąd średni
+rósł ze 3-8m do 140-250m -- realne pogorszenie. Przy progu ≥35 (obecna
+wartość domyślna) regulator nigdy się nie wyzwala na tych 4 trasach --
+bezpieczny no-op, zweryfikowany testem jednostkowym z syntetycznym wyrzutem,
+że faktycznie łapie prawdziwe anomalie, gdy się pojawią. Nie mam na tych
+danych przykładu, gdzie wersja kalmanowa realnie POMAGA -- tylko dowód, że
+przy złym progu szkodzi, a przy bezpiecznym nic nie robi.
+
+**Wersja cząsteczkowa pomaga, zmierzone:** średni błąd na 4 trasach spada
+z 3.10m (bez regulatora) do 1.04m (z pełnym regulatorem), najgorszy
+przypadek (T-29) z 258.84m do 12.38m. Ablacja pokazuje, że nie wszystkie
+trzy mechanizmy wnoszą tyle samo -- wyłączenie samego podbicia
+`measurement_sigma` po defekcie daje jeszcze lepszy wynik (0.83m / 8.36m)
+niż pełna wersja. Zostawiony w kodzie z domyślną wartością zamiast dalej
+dostrajany pod te same 4 trasy, żeby nie powtórzyć przeuczenia z Rundy 1
+filtra cząsteczkowego.
+
+| wariant particle                          | avg mean | worst max |
+|--------------------------------------------|---------:|----------:|
+| plain (bez regulatora)                      |   3.10m  |  258.84m  |
+| pełny regulator                             |   1.04m  |   12.38m  |
+| bez roughening                              |   1.37m  |   19.14m  |
+| bez sigma-boost                             |   0.83m  |    8.36m  |
+| bez process-boost                           |   1.36m  |   23.49m  |
+
+25 testów (`python3 -m pytest tests/ -v`), wszystkie przechodzą, w tym
+regresyjny test na błąd kompozycji opisany wyżej.
