@@ -175,3 +175,40 @@ filtra cząsteczkowego.
 
 25 testów (`python3 -m pytest tests/ -v`), wszystkie przechodzą, w tym
 regresyjny test na błąd kompozycji opisany wyżej.
+
+### Druga symulacja: wstrzyknięte usterki sensora (`data/validate_regulator_glitch_injection.py`)
+
+Powyższa walidacja pokazała, że na czystych danych GPS wersja kalmanowa
+(gate) nigdy się nie wyzwala -- bo tam nie ma prawdziwych pojedynczych
+anomalii, tylko szybka, legalna jazda. Żeby to sprawdzić uczciwie, druga
+symulacja wstrzykuje symulowane usterki sensora (pojedynczy pomiar
+przesunięty o 150-400m, jak odbicie wielodrogowe GPS) co 40 kroków na
+każdej z 4 prawdziwych tras, i liczy błąd względem prawdziwej (nieuszkodzonej)
+pozycji.
+
+| trasa | backend  | bez regulatora | z regulatorem | poprawa |
+|-------|----------|----------------:|---------------:|--------:|
+| T-1   | kalman   | 14.02m | 8.12m | 42.1% |
+| T-1   | particle | 2.10m | 0.83m | 60.2% |
+| T-14  | kalman   | 14.14m | 6.79m | 52.0% |
+| T-14  | particle | 1.89m | 0.79m | 58.3% |
+| T-29  | kalman   | 12.28m | 5.47m | 55.4% |
+| T-29  | particle | 2082.99m | 0.84m | 100.0% |
+| T-3   | kalman   | 10.95m | 3.60m | 67.1% |
+| T-3   | particle | 0.88m | 0.65m | 26.3% |
+
+Tym razem obie wersje regulatora realnie pomagają -- bo tym razem jest
+coś do złapania. Na T-29 czysty filtr cząsteczkowy (bez regulatora) sam
+katastrofalnie się rozjeżdża pod wpływem jednej dużej usterki (2083m
+średniego błędu) -- z regulatorem wraca do 0.84m.
+
+Sprawdzone też, jak duża musi być usterka, żeby regulator faktycznie
+pomógł (kalman, T-1): przy usterkach powyżej progu `defect_threshold=35`
+regulator wyraźnie pomaga; przy usterkach w okolicach lub poniżej progu
+(30-60m i mniej) jest neutralny albo lekko szkodliwy (jeden niefortunny
+gate na normalnym, nie-anomalnym pomiarze). To zgodne z tym, jak próg
+działa z definicji -- nie jest to nowy problem, tylko potwierdzenie
+zakresu działania.
+
+26 testów łącznie (`python3 -m pytest tests/ -v`), w tym regresyjny test
+na ten scenariusz z wstrzykniętą usterką.
