@@ -210,5 +210,85 @@ gate na normalnym, nie-anomalnym pomiarze). To zgodne z tym, jak próg
 działa z definicji -- nie jest to nowy problem, tylko potwierdzenie
 zakresu działania.
 
-26 testów łącznie (`python3 -m pytest tests/ -v`), w tym regresyjny test
-na ten scenariusz z wstrzykniętą usterką.
+34 testy łącznie (`python3 -m pytest tests/ -v`), w tym regresyjny test
+na ten scenariusz z wstrzykniętą usterką oraz 9 testów CurvatureDetectora
+opisanego niżej.
+
+
+## Krzywizna trajektorii jako niezależny sygnał manewru (`core/curvature_detector.py`)
+
+Drugi, osobny od JRegulatora sygnał wykrywania manewru -- oparty na pomyśle
+z repo `jbackk-lang/THE` (dyskretna krzywizna Freneta-Serreta: jak bardzo
+kierunek ruchu zmienia się między kolejnymi krokami).
+
+### Co sprawdzono i co odrzucono
+
+Repo THE opisuje krzywiznę **i torsję** trajektorii w 3D. Sprawdzono trzy
+warianty na 4 prawdziwych trasach GPS (`data/real_trips_sample.csv`, z
+niezależnie zaetykietowaną prawdziwą zmianą kursu `Heading_Change`):
+
+1. **Torsja w 2D** -- odrzucona od razu: torsja z definicji mierzy wychodzenie
+   trajektorii poza płaszczyznę ruchu, a ślad 2D z definicji leży w jednej
+   płaszczyźnie, więc jest strukturalnie zawsze zero. Nie dotyczy radaru
+   naziemnego (dotyczyłaby np. realnego 3D ze zmienną wysokością celu).
+
+2. **"THE-GEO PRO 2D→3D"** (wariant z syntetyczną "głębokością percepcyjną"
+   `dz = f(dx,dy)` i nową torsją `tau = dx*dy/G²`) -- odrzucony po teście
+   numerycznym: dla zwykłej linii prostej pod kątem do osi (dx=3, dy=4 na
+   każdym kroku, zero manewru z definicji) `tau` wychodzi 0.375 zamiast 0 --
+   fałszywy alarm identyczny w naturze do wcześniej odrzuconych wariantów
+   `operator_J`. Dodatkowo nie jest niezmienniczy względem obrotu układu
+   współrzędnych (ten sam fizyczny ruch po linii prostej daje różne `tau`
+   zależnie od orientacji osi X/Y na mapie) -- fizycznie niepoprawne.
+
+3. **Sama krzywizna 2D** liczona dosłownie wg pseudokodu (`kappa = |D_t -
+   D_t-1| / G`, bez zabezpieczeń) -- też odrzucona w tej formie: przy
+   postoju lub bardzo wolnym ruchu szum pozycji GPS (ułamki metra) dzielony
+   przez mikroskopijny krok `G` daje ogromne fałszywe piki (test: krzywizna
+   71.2 przy czystym postoju z szumem GPS ~30cm, powinno być 0). Ta sama
+   kategoria błędu co dzielenie przez zero w JRegulatorze i w Helix-Astro.
+
+### Co zostało: krzywizna z progiem minimalnego kroku
+
+Naprawa: krzywizna nie jest liczona (zwraca 0.0, oznaczone `gated=True`)
+gdy krok między próbkami jest krótszy niż `min_step_m` (domyślnie 3.0 m --
+dobrane empirycznie jako punkt najwyższej korelacji z prawdziwą zmianą
+kursu na testowanych trasach).
+
+**Wyniki walidacji** (korelacja Pearsona: krzywizna vs `|Heading_Change|`,
+4 prawdziwe trasy):
+
+| próg min_step_m | T-1 | T-3 | T-14 | T-29 |
+|---|---|---|---|---|
+| brak (surowy pseudokod) | -0.05 | -0.08 | -0.00 | -0.03 |
+| 3.0 m (przyjęty) | **0.65** | **0.57** | **0.76** | **0.47** |
+
+Dla porównania: żaden z 6 wcześniej testowanych wariantów `operator_J` nie
+przekroczył ~17% pokrycia górnego decyla z prawdziwymi dużymi `|Δv|`; ten
+detektor osiąga 36-43% pokrycia górnego decyla z prawdziwą zmianą kursu, i
+dodatnią, sensowną korelację zamiast szumu.
+
+Testy sanity (`tests/test_curvature_detector.py`): linia prosta (osiowo i
+po przekątnej) → krzywizna dokładnie 0; niezmienniczość względem obrotu
+układu współrzędnych; ostry skręt 90° → wyraźny pojedynczy pik; postój z
+szumem GPS → 0 z progiem (i regresyjny test dowodzący, że bez progu ten sam
+szum daje fałszywy pik >1.0, żeby nikt przypadkiem nie usunął zabezpieczenia
+myśląc że jest zbędne); test regresyjny na realnej korelacji z 4 tras.
+
+### Status
+
+To jest **dodatkowy, niezależny** sygnał -- nie zastępuje JRegulatora i nie
+jest w niego automatycznie wpięty (JRegulator reguluje parametry filtra i
+bramkuje pomiary; CurvatureDetector tylko ocenia geometrię trajektorii).
+Można go użyć osobno, np. do flagowania podejrzanych segmentów trajektorii
+do dalszej analizy:
+
+```python
+from core.curvature_detector import CurvatureDetector
+
+det = CurvatureDetector(min_step_m=3.0)
+for x, y in trajektoria:
+    wynik = det.update(x, y)
+    if not wynik.gated and wynik.curvature > próg:
+        ...  # podejrzany manewr
+```
